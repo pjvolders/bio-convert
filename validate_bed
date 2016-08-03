@@ -1,0 +1,195 @@
+#!/usr/bin/python
+
+import sys
+import os
+
+def main(argv):
+
+	######
+	## check and parse 	arguemnts
+
+	if (len(argv) != 3) and (len(argv) != 4):
+		print 'validate_bed <input.bed> <chrom.sizes> <output.bed> [faulty.bed]'
+		sys.exit(2)
+
+	input_bed			= argv[0]
+	input_chrom_sizes	= argv[1]
+	output_bed			= argv[2]
+	output_faulty		= 0
+
+	if len(argv) == 4:
+		output_faulty = argv[3]
+
+	if os.path.isdir(input_bed) or not os.path.exists(input_bed):
+		print "File %(input_bed)s does not exist" % vars()
+		sys.exit(3)
+
+	infile = open(input_bed)
+	outfile = open(output_bed, 'w')
+
+	chrom_sizes_file = open(input_chrom_sizes)
+	chrom_sizes = {}
+	try:
+		for line in chrom_sizes_file:
+			c = line.rstrip().split("\t")
+			chrom_sizes[c[0]] = int(c[1])
+	except Exception, e:
+		print "Error parson chrom.sizes file"
+		raise e
+
+	########
+	## Read file line by line
+	# Required fields:
+	#
+	# 1. chrom - name of the chromosome or scaffold. Any valid seq_region_name can be used, and chromosome names can be given with or without the 'chr' prefix.
+	# 2. chromStart - Start position of the feature in standard chromosomal coordinates (i.e. first base is 0).
+	# 3. chromEnd - End position of the feature in standard chromosomal coordinates
+	#
+	# Optional fields:
+	#
+	# 4. name - Label to be displayed under the feature, if turned on in "Configure this page".
+	# 5. score - A score between 0 and 1000. See track lines, below, for ways to configure the display style of scored data.
+	# 6. strand - defined as + (forward) or - (reverse).
+	# 7. thickStart - coordinate at which to start drawing the feature as a solid rectangle (not currently supported)
+	# 8. thickEnd - coordinate at which to stop drawing the feature as a solid rectangle (not currently supported)
+	# 9. itemRgb - an RGB colour value (e.g. 0,0,255). Only used if there is a track line with the value of itemRgb set to "on" (case-insensitive).
+	# 10. blockCount - the number of sub-elements (e.g. exons) within the feature
+	# 11. blockSizes - the size of these sub-elements
+	# 12. blockStarts - the start coordinate of each sub-element
+
+	line_number = 0
+
+	for line in infile:
+		line_number+=1
+
+		l = line.rstrip().split("\t")
+
+		##########
+		# CHECK
+		# check chromosome
+		chromosome = l[0]
+		chromosome_size = 0
+		try:
+			chromosome_size = chrom_sizes[chromosome]
+		except Exception, e:
+			print "Error faulty chromosome name at line %d" % (line_number)
+			continue
+
+		##########
+		# CHECK
+		# parse chromStart
+		start = l[1]
+		try:
+			start = int(start)
+		except Exception, e:
+			print "Error parsing start coordinate at line %d" % (line_number)
+			continue
+
+		##########
+		# CHECK
+		# check chromStart
+		if start >= chromosome_size:
+			print "Error start coordinate %d larger than chromosome size %d at line %d" % (start, chromosome_size, line_number)
+			continue
+
+		##########
+		# CHECK
+		# parse chromEnd
+		end = l[2]
+		try:
+			end = int(end)
+		except Exception, e:
+			print "Error parsing end coordinate at line %d" % (line_number)
+			continue
+
+		##########
+		# CHECK
+		# check chromEnd
+		if end > chromosome_size:
+			print "Error end coordinate %d larger than chromosome size %d at line %d" % (end, chromosome_size, line_number)
+			continue
+
+		##########
+		# CHECK
+		# parse score
+		score = l[4]
+		try:
+			score = int(score)
+		except Exception, e:
+			print "Error parsing score at line %d" % (line_number)
+			continue
+
+		##########
+		# CHECK
+		# parse blockCount
+		block_count = 0
+		try:
+			block_count = int(l[9])
+		except Exception, e:
+			print "Error parsing blockCount at line %d"% (line_number)
+			continue
+
+		# Parse blockSizes
+		block_sizes = l[10].split(",")
+
+		# allow for a trailing ,
+		if block_sizes[-1] == '':
+			block_sizes.pop()
+
+		##########
+		# CHECK
+		# convert all blockSizes to int
+		try:
+			block_sizes = [ int(x) for x in block_sizes ]
+		except Exception, e:
+			print "Error parsing blockSizes at line %d"% (line_number)
+			continue
+
+		# Parse blockStarts
+		block_starts = l[11].split(",")
+
+		# allow for a trailing ,
+		if block_starts[-1] == '':
+			block_starts.pop()
+
+		##########
+		# CHECK
+		# convert all blockStarts to int
+		try:
+			block_starts = [ int(x) for x in block_starts ]
+		except Exception, e:
+			print "Error parsing blockStarts at line %d"% (line_number)
+			continue
+
+		##########
+		# CHECK
+		# blockSizes & blockStarts & blockCount need to be consistent
+		if (block_count != len(block_sizes)) or (block_count != len(block_starts)):
+			print "Error number of blocks inconsistent at line %d"% (line_number)
+			continue
+
+		##########
+		# CHECK
+		# blocks must be in ascending order and without overlap
+		try:
+			for i in xrange(1,block_count):
+				if not (block_starts[i] > block_starts[i-1]):
+					raise Exception('ascending', i)
+					break
+				if (block_starts[i-1]+block_sizes[i-1] > block_starts[i]):
+					raise Exception('overlap', i)
+					break
+		except Exception, e:
+			type, block = e.args
+			print "Error blocks inconsistent (blocks %d and %d) at line %d"% (block-1, block, line_number)
+			continue
+
+		###########
+		## ALL GOOD
+		outfile.write(line)
+
+	infile.close()
+	outfile.close()
+
+if __name__ == "__main__":
+	main(sys.argv[1:]) 
